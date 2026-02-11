@@ -5,6 +5,7 @@ import { Route, Routes, useLocation } from 'react-router-dom'
 import NoConnectionScreen from '@common/modules/no-connection/screens/NoConnectionScreen'
 import routesConfig from '@common/modules/router/config/routesConfig'
 import { WEB_ROUTES } from '@common/modules/router/constants/common'
+import { PrivacyPoolsProtocolProvider } from '@web/contexts/privacyPoolsContext'
 import { SignAccountOpControllerStateProvider } from '@web/contexts/signAccountOpControllerStateContext'
 import AccountPersonalizeScreen from '@web/modules/account-personalize/screens/AccountPersonalizeScreen'
 import AccountPickerScreen from '@web/modules/account-picker/screens/AccountPickerScreen'
@@ -50,6 +51,7 @@ import SecurityAndPrivacyScreen from '@web/modules/settings/screens/SecurityAndP
 import SignedMessageHistorySettingsScreen from '@web/modules/settings/screens/SignedMessageHistorySettingsScreen'
 import TermsSettingsScreen from '@web/modules/settings/screens/TermsSettingsScreen'
 import TransactionHistorySettingsScreen from '@web/modules/settings/screens/TransactionHistorySettingsScreen'
+import ShieldScreen from '@web/modules/shield/screens/ShieldScreen'
 import SignAccountOpScreen from '@web/modules/sign-account-op/screens/SignAccountOpScreen'
 import SignMessageScreen from '@web/modules/sign-message/screens/SignMessageScreen'
 import SwapAndBridgeScreen from '@web/modules/swap-and-bridge/screens/SwapAndBridgeScreen'
@@ -162,6 +164,14 @@ const MainRoutes = () => {
             }
           />
           <Route path={WEB_ROUTES.swapAndBridge} element={<SwapAndBridgeScreen />} />
+          <Route
+            path={WEB_ROUTES.shield}
+            element={
+              <PrivacyPoolsProtocolProvider>
+                <ShieldScreen />
+              </PrivacyPoolsProtocolProvider>
+            }
+          />
           <Route path={WEB_ROUTES.signMessage} element={<SignMessageScreen />} />
           <Route path={WEB_ROUTES.benzin} element={<BenzinScreen />} />
           <Route path={WEB_ROUTES.switchAccount} element={<SwitchAccountScreen />} />

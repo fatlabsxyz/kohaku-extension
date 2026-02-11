@@ -4,6 +4,7 @@ import { View } from 'react-native'
 import DAppsIcon from '@common/assets/svg/DAppsIcon'
 import ReceiveIcon from '@common/assets/svg/ReceiveIcon'
 import SendIcon from '@common/assets/svg/SendIcon'
+import ShieldIcon from '@common/assets/svg/ShieldIcon'
 import SwapAndBridgeIcon from '@common/assets/svg/SwapAndBridgeIcon'
 import { useTranslation } from '@common/config/localization'
 import { WEB_ROUTES } from '@common/modules/router/constants/common'
@@ -29,6 +30,15 @@ const Routes = ({ openReceiveModal }: { openReceiveModal: () => void }) => {
       icon: ReceiveIcon,
       label: t('Receive'),
       onPress: openReceiveModal,
+      isExternal: false,
+      scale: 1.08,
+      scaleOnHover: 1.18
+    },
+    {
+      testID: 'dashboard-button-shield',
+      icon: ShieldIcon,
+      label: t('Shield'),
+      route: WEB_ROUTES.shield,
       isExternal: false,
       scale: 1.08,
       scaleOnHover: 1.18

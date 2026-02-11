@@ -157,6 +157,11 @@ const routesConfig: RouteConfig = {
     name: Platform.select({ default: i18n.t('Send') }),
     withTitlePrefix: false
   },
+  [ROUTES.shield]: {
+    route: ROUTES.shield,
+    title: Platform.select({ default: i18n.t('Shield') }),
+    name: Platform.select({ default: i18n.t('Shield') })
+  },
   [ROUTES.transactions]: {
     route: ROUTES.transactions,
     title: Platform.select({

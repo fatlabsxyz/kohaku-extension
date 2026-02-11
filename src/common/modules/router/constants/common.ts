@@ -16,6 +16,7 @@ const WEB_ROUTES = {
   dashboard: 'dashboard',
   earn: 'earn',
   transfer: 'transfer',
+  shield: 'shield',
   topUpGasTank: 'top-up-gas-tank',
   signAccountOp: 'sign-account-op',
   transactions: 'transactions',
