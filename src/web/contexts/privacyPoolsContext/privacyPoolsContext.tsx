@@ -7,9 +7,9 @@ import {
   Host,
   Keystore,
   Storage as PluginStorage,
-  SecretStorage as PluginSecretStorage
+  SecretStorage as PluginSecretStorage,
 } from '@kohaku-eth/plugins'
-import { PrivacyPoolsV1Protocol, MAINNET_CONFIG } from '@kohaku-eth/privacy-pools'
+import { PrivacyPoolsV1Protocol, MAINNET_CONFIG, AspService, SecretManager } from '@kohaku-eth/privacy-pools'
 import eventBus from '@web/extension-services/event/eventBus'
 import useBackgroundService from '@web/hooks/useBackgroundService'
 import useKeystoreControllerState from '@web/hooks/useKeystoreControllerState'
@@ -102,12 +102,22 @@ const PrivacyPoolsProtocolProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       const instance = new PrivacyPoolsV1Protocol(host, {
+        secretManager: () => {
+          const sm = SecretManager({host, accountIndex: 1});
+          const derive = (di: number, wi: number) => sm.getSecrets({ entrypointAddress: BigInt(MAINNET_CONFIG.ENTRYPOINT_ADDRESS), chainId: 1n, depositIndex: di, withdrawIndex: wi});
+          console.log(derive);
+          return sm;
+        },
         chainsEntrypoints: {
           [`eip155:${MAINNET_CONFIG.CHAIN_ID}`]: {
             address: BigInt(MAINNET_CONFIG.ENTRYPOINT_ADDRESS),
             deploymentBlock: 22153713n
           }
-        }
+        },
+        relayersList: {
+          [`eip155:${MAINNET_CONFIG.CHAIN_ID}`]: 'http://localhost:3000/relayer'
+        },
+        aspServiceFactory: () => new AspService({network: host.network, aspUrl: 'http://localhost:3001/'})
       })
 
       setProtocol(instance)

@@ -4,7 +4,7 @@ import { parseEther } from 'ethers'
 
 import { Session } from '@ambire-common/classes/session'
 import { SignUserRequest } from '@ambire-common/interfaces/userRequest'
-import { AssetAmount, Eip155ChainId, Erc20Id } from '@kohaku-eth/plugins'
+import { AssetAmount, Eip155AccountId, Eip155ChainId, Erc20Id } from '@kohaku-eth/plugins'
 import { MAINNET_CONFIG, E_ADDRESS } from '@kohaku-eth/privacy-pools'
 import BackButton from '@common/components/BackButton'
 import Button from '@common/components/Button'
@@ -47,35 +47,32 @@ const ShieldScreen = () => {
   const [shieldAmount, setShieldAmount] = useState('')
   const [isShielding, setIsShielding] = useState(false)
   const [shieldError, setShieldError] = useState<string | null>(null)
+  const [withdrawAmount, setWithdrawAmount] = useState('')
+  const [withdrawRecipient, setWithdrawRecipient] = useState('')
+  const [isWithdrawing, setIsWithdrawing] = useState(false)
+  const [withdrawError, setWithdrawError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const fetchBalances = useCallback(async () => {
     if (!protocol || !isReady) return
 
-    let cancelled = false
-
-    const fetchBalances = async () => {
-      try {
-        setIsLoading(true)
-        const [approved, unapproved] = await Promise.all([
-          protocol.balance([NATIVE_ASSET], 'approved'),
-          protocol.balance([NATIVE_ASSET], 'unapproved')
-        ])
-        if (cancelled) return
-        setApprovedBalances(approved)
-        setUnapprovedBalances(unapproved)
-      } catch {
-        // Balances stay at defaults
-      } finally {
-        if (!cancelled) setIsLoading(false)
-      }
-    }
-
-    fetchBalances()
-
-    return () => {
-      cancelled = true
+    try {
+      setIsLoading(true)
+      const [approved, unapproved] = await Promise.all([
+        protocol.balance([NATIVE_ASSET], 'approved'),
+        protocol.balance([NATIVE_ASSET], 'unapproved')
+      ])
+      setApprovedBalances(approved)
+      setUnapprovedBalances(unapproved)
+    } catch {
+      // Balances stay at defaults
+    } finally {
+      setIsLoading(false)
     }
   }, [protocol, isReady])
+
+  useEffect(() => {
+    fetchBalances()
+  }, [fetchBalances])
 
   const handleShield = useCallback(async () => {
     if (!protocol || !shieldAmount || !account) return
@@ -117,6 +114,36 @@ const ShieldScreen = () => {
       setIsShielding(false)
     }
   }, [protocol, shieldAmount, account, dispatch])
+
+  const handleWithdraw = useCallback(async () => {
+    if (!protocol || !withdrawAmount || !withdrawRecipient) return
+
+    setWithdrawError(null)
+    setIsWithdrawing(true)
+
+    try {
+      const amount = parseEther(withdrawAmount)
+      const recipient = new Eip155AccountId(
+        withdrawRecipient as `0x${string}`,
+        MAINNET_CHAIN_ID
+      )
+
+      const operation = await protocol.prepareUnshield(
+        { asset: NATIVE_ASSET, amount },
+        recipient
+      )
+
+      await protocol.broadcastPrivateOperation(operation)
+
+      setWithdrawAmount('')
+      setWithdrawRecipient('')
+      fetchBalances()
+    } catch (err) {
+      setWithdrawError(err instanceof Error ? err.message : 'Failed to withdraw')
+    } finally {
+      setIsWithdrawing(false)
+    }
+  }, [protocol, withdrawAmount, withdrawRecipient, fetchBalances])
 
   const showLoading = !isReady || isLoading
 
@@ -178,6 +205,38 @@ const ShieldScreen = () => {
             text={isShielding ? 'Shielding...' : 'Shield'}
             onPress={handleShield}
             disabled={!isReady || !shieldAmount || isShielding}
+            hasBottomSpacing={false}
+          />
+        </View>
+
+        <View style={[styles.balanceCard, spacings.mtSm]}>
+          <Text fontSize={14} weight="medium" style={spacings.mbSm}>
+            Withdraw ETH
+          </Text>
+          <Input
+            placeholder="0x..."
+            value={withdrawRecipient}
+            onChangeText={setWithdrawRecipient}
+            containerStyle={spacings.mbSm}
+            label="Recipient address"
+          />
+          <Input
+            placeholder="0.0"
+            value={withdrawAmount}
+            onChangeText={setWithdrawAmount}
+            keyboardType="decimal-pad"
+            containerStyle={spacings.mbSm}
+            label="Amount"
+          />
+          {!!withdrawError && (
+            <Text fontSize={12} color={theme.errorText} style={spacings.mbTy}>
+              {withdrawError}
+            </Text>
+          )}
+          <Button
+            text={isWithdrawing ? 'Withdrawing...' : 'Withdraw'}
+            onPress={handleWithdraw}
+            disabled={!isReady || !withdrawAmount || !withdrawRecipient || isWithdrawing}
             hasBottomSpacing={false}
           />
         </View>

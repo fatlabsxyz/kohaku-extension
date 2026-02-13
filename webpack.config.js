@@ -77,10 +77,10 @@ module.exports = async function (env, argv) {
     // {@link https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/Sources}
     // {@link https://web.dev/csp/}
 
-    const csp = "frame-ancestors 'none'; script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+    const csp = "frame-ancestors 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; object-src 'self';"
 
     if (isGecko) {
-      manifest.background = { page: 'background.html' }
+      manifest.background = { scripts: ['background.js'] }
       manifest.host_permissions = [...manifest.host_permissions, '<all_urls>']
       manifest.browser_specific_settings = {
         gecko: {
@@ -286,6 +286,10 @@ module.exports = async function (env, argv) {
 
           return content
         }
+      },
+      {
+        from: './node_modules/@fatsolutions/privacy-pools-core-circuits/artifacts',
+        to: 'artifacts',
       },
       {
         from: './src/web/public/manifest.json',
