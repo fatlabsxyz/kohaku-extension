@@ -4,7 +4,7 @@ import { parseEther } from 'ethers'
 
 import { Session } from '@ambire-common/classes/session'
 import { SignUserRequest } from '@ambire-common/interfaces/userRequest'
-import { AssetAmount, Eip155AccountId, Eip155ChainId, Erc20Id } from '@kohaku-eth/plugins'
+import { AssetAmount, ERC20AssetId } from '@kohaku-eth/plugins'
 import { MAINNET_CONFIG, E_ADDRESS } from '@kohaku-eth/privacy-pools'
 import BackButton from '@common/components/BackButton'
 import Button from '@common/components/Button'
@@ -25,8 +25,7 @@ import useSelectedAccountControllerState from '@web/hooks/useSelectedAccountCont
 
 import getStyles from './styles'
 
-const MAINNET_CHAIN_ID = new Eip155ChainId(MAINNET_CONFIG.CHAIN_ID)
-const NATIVE_ASSET = new Erc20Id(E_ADDRESS as `0x${string}`, MAINNET_CHAIN_ID)
+const NATIVE_ASSET: ERC20AssetId = { __type: 'erc20', contract: E_ADDRESS as `0x${string}` }
 
 const formatBalance = (balances: AssetAmount[]): string => {
   if (!balances.length) return '0'
@@ -37,7 +36,7 @@ const formatBalance = (balances: AssetAmount[]): string => {
 
 const ShieldScreen = () => {
   const { styles, theme } = useTheme(getStyles)
-  const { protocol, isReady } = usePrivacyPoolsProtocol()
+  const { instance, broadcaster, isReady } = usePrivacyPoolsProtocol()
   const { dispatch } = useBackgroundService()
   const { account } = useSelectedAccountControllerState()
 
@@ -53,42 +52,33 @@ const ShieldScreen = () => {
   const [withdrawError, setWithdrawError] = useState<string | null>(null)
 
   const fetchBalances = useCallback(async () => {
-    if (!protocol || !isReady) return
+    if (!instance || !isReady) return
 
     try {
       setIsLoading(true)
-      const [approved, unapproved] = await Promise.all([
-        protocol.balance([NATIVE_ASSET], 'approved'),
-        protocol.balance([NATIVE_ASSET], 'unapproved')
-      ])
-      setApprovedBalances(approved)
-      setUnapprovedBalances(unapproved)
+      const balances = await instance.balance([NATIVE_ASSET])
+      setApprovedBalances(balances.map((b) => ({ asset: b.asset, amount: b.amount })))
+      setUnapprovedBalances(balances.map((b) => ({ asset: b.asset, amount: b.pendingAmount })))
     } catch {
       // Balances stay at defaults
     } finally {
       setIsLoading(false)
     }
-  }, [protocol, isReady])
+  }, [instance, isReady])
 
   useEffect(() => {
     fetchBalances()
   }, [fetchBalances])
 
   const handleShield = useCallback(async () => {
-    if (!protocol || !shieldAmount || !account) return
+    if (!instance || !shieldAmount || !account) return
 
     setShieldError(null)
     setIsShielding(true)
 
     try {
       const amount = parseEther(shieldAmount)
-      const preparation = await protocol.prepareShield({ asset: NATIVE_ASSET, amount })
-
-      const calls = preparation.txns.map((tx) => ({
-        to: tx.to,
-        value: tx.value,
-        data: tx.data
-      }))
+      const { txns: calls } = await instance.prepareShield({ asset: NATIVE_ASSET, amount })
 
       const userRequest: SignUserRequest = {
         id: Date.now(),
@@ -113,27 +103,22 @@ const ShieldScreen = () => {
     } finally {
       setIsShielding(false)
     }
-  }, [protocol, shieldAmount, account, dispatch])
+  }, [instance, shieldAmount, account, dispatch])
 
   const handleWithdraw = useCallback(async () => {
-    if (!protocol || !withdrawAmount || !withdrawRecipient) return
+    if (!instance || !broadcaster || !withdrawAmount || !withdrawRecipient) return
 
     setWithdrawError(null)
     setIsWithdrawing(true)
 
     try {
       const amount = parseEther(withdrawAmount)
-      const recipient = new Eip155AccountId(
-        withdrawRecipient as `0x${string}`,
-        MAINNET_CHAIN_ID
-      )
-
-      const operation = await protocol.prepareUnshield(
+      const operation = await instance.prepareUnshield(
         { asset: NATIVE_ASSET, amount },
-        recipient
+        withdrawRecipient as `0x${string}`
       )
 
-      await protocol.broadcastPrivateOperation(operation)
+      await broadcaster.broadcast(operation)
 
       setWithdrawAmount('')
       setWithdrawRecipient('')
@@ -143,7 +128,7 @@ const ShieldScreen = () => {
     } finally {
       setIsWithdrawing(false)
     }
-  }, [protocol, withdrawAmount, withdrawRecipient, fetchBalances])
+  }, [instance, broadcaster, withdrawAmount, withdrawRecipient, fetchBalances])
 
   const showLoading = !isReady || isLoading
 

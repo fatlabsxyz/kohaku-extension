@@ -6,31 +6,16 @@ import {
   EthProvider,
   Host,
   Keystore,
-  Storage as PluginStorage,
   SecretStorage as PluginSecretStorage,
 } from '@kohaku-eth/plugins'
-import { PrivacyPoolsV1Protocol, MAINNET_CONFIG, AspService, SecretManager } from '@kohaku-eth/privacy-pools'
+import { createPPv1Plugin, MAINNET_CONFIG } from '@kohaku-eth/privacy-pools'
 import eventBus from '@web/extension-services/event/eventBus'
 import useBackgroundService from '@web/hooks/useBackgroundService'
 import useKeystoreControllerState from '@web/hooks/useKeystoreControllerState'
 import useNetworksControllerState from '@web/hooks/useNetworksControllerState'
-import useStorageControllerState from '@web/hooks/useStorageControllerState'
 import useStorageController from '@common/hooks/useStorageController'
 
-const STORAGE_PREFIX = 'pp_v1_'
 const SECRET_STORAGE_PREFIX = 'pp_v1_secret_'
-
-function createStorage(): PluginStorage {
-  return {
-    _brand: 'Storage',
-    set(key: string, value: string) {
-      localStorage.setItem(`${STORAGE_PREFIX}${key}`, value)
-    },
-    get(key: string) {
-      return localStorage.getItem(`${STORAGE_PREFIX}${key}`)
-    }
-  }
-}
 
 function createSecretStorage(): PluginSecretStorage {
   return {
@@ -64,13 +49,20 @@ function createEthProvider(rpcUrl: string): EthProvider {
   }
 }
 
+type PPv1Plugin = Awaited<ReturnType<typeof createPPv1Plugin>>
+type PPv1Instance = Awaited<ReturnType<PPv1Plugin['createInstance']>>
+type PPv1PrivateOp = Awaited<ReturnType<PPv1Instance['prepareUnshield']>>
+type PPv1Broadcaster = { broadcast: (op: PPv1PrivateOp) => Promise<void> }
+
 interface PrivacyPoolsContextValue {
-  protocol: PrivacyPoolsV1Protocol | null
+  instance: PPv1Instance | null
+  broadcaster: PPv1Broadcaster | null
   isReady: boolean
 }
 
 const PrivacyPoolsContext = createContext<PrivacyPoolsContextValue>({
-  protocol: null,
+  instance: null,
+  broadcaster: null,
   isReady: false
 })
 
@@ -78,13 +70,14 @@ const PrivacyPoolsProtocolProvider: React.FC<{ children: React.ReactNode }> = ({
   const { dispatch } = useBackgroundService()
   const keystoreState = useKeystoreControllerState()
   const networksState = useNetworksControllerState()
-  const storage = useStorageController();
-  const [protocol, setProtocol] = useState<PrivacyPoolsV1Protocol | null>(null)
+  const storage = useStorageController()
+  const [instance, setInstance] = useState<PPv1Instance | null>(null)
+  const [broadcaster, setBroadcaster] = useState<PPv1Broadcaster | null>(null)
   const [isReady, setIsReady] = useState(false)
   const initRef = useRef(false)
 
   const initProtocol = useCallback(
-    (seedPhrase: string) => {
+    async (seedPhrase: string) => {
       const networks = (networksState as any).networks || []
       const ethereumNetwork = networks.find(
         (n: any) => n.chainId === BigInt(MAINNET_CONFIG.CHAIN_ID)
@@ -95,35 +88,27 @@ const PrivacyPoolsProtocolProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const host: Host = {
         network: { fetch: globalThis.fetch.bind(globalThis) },
-        storage: { get: storage.getItem, set: storage.setItem },
+        storage: { get: storage.getItem, set: storage.setItem } as Host['storage'],
         secretStorage: createSecretStorage(),
         keystore: createKeystore(seedPhrase),
         ethProvider: createEthProvider(rpcUrl)
       }
 
-      const instance = new PrivacyPoolsV1Protocol(host, {
-        secretManager: () => {
-          const sm = SecretManager({host, accountIndex: 1});
-          const derive = (di: number, wi: number) => sm.getSecrets({ entrypointAddress: BigInt(MAINNET_CONFIG.ENTRYPOINT_ADDRESS), chainId: 1n, depositIndex: di, withdrawIndex: wi});
-          console.log(derive);
-          return sm;
-        },
-        chainsEntrypoints: {
-          [`eip155:${MAINNET_CONFIG.CHAIN_ID}`]: {
-            address: BigInt(MAINNET_CONFIG.ENTRYPOINT_ADDRESS),
-            deploymentBlock: 22153713n
-          }
-        },
-        relayersList: {
-          [`eip155:${MAINNET_CONFIG.CHAIN_ID}`]: 'http://localhost:3000/relayer'
-        },
-        aspServiceFactory: () => new AspService({network: host.network, aspUrl: 'http://localhost:3001/'})
+      const pp = await createPPv1Plugin(host, {
+        ipfsUrl: 'http://localhost:3001/',
+        broadcasterUrl: 'http://localhost:3000/relayer',
+        entrypoint: {
+          address: BigInt(MAINNET_CONFIG.ENTRYPOINT_ADDRESS),
+          deploymentBlock: 22153713n
+        }
       })
 
-      setProtocol(instance)
+      const inst = await pp.createInstance()
+      setInstance(inst)
+      setBroadcaster((pp as unknown as { broadcaster: PPv1Broadcaster }).broadcaster)
       setIsReady(true)
     },
-    [networksState, storage, setProtocol, setIsReady, storage]
+    [networksState, storage]
   )
 
   useEffect(() => {
@@ -151,7 +136,7 @@ const PrivacyPoolsProtocolProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [keystoreState, dispatch])
 
   return (
-    <PrivacyPoolsContext.Provider value={{ protocol, isReady }}>
+    <PrivacyPoolsContext.Provider value={{ instance, broadcaster, isReady }}>
       {children}
     </PrivacyPoolsContext.Provider>
   )
