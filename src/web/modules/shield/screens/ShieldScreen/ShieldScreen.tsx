@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { View } from 'react-native'
-import { parseEther } from 'ethers'
+import { TouchableOpacity, View } from 'react-native'
+import { formatEther, parseEther } from 'ethers'
 
 import { Session } from '@ambire-common/classes/session'
 import { SignUserRequest } from '@ambire-common/interfaces/userRequest'
 import { AssetAmount, ERC20AssetId } from '@kohaku-eth/plugins'
 import { MAINNET_CONFIG, E_ADDRESS } from '@kohaku-eth/privacy-pools'
+import FireIcon from '@common/assets/svg/FireIcon'
 import BackButton from '@common/components/BackButton'
 import Button from '@common/components/Button'
 import Input from '@common/components/Input'
@@ -19,7 +20,7 @@ import {
   TabLayoutContainer,
   tabLayoutWidths
 } from '@web/components/TabLayoutWrapper/TabLayoutWrapper'
-import { usePrivacyPoolsProtocol } from '@web/contexts/privacyPoolsContext'
+import { usePrivacyPoolsProtocol, PPv1Note } from '@web/contexts/privacyPoolsContext'
 import useBackgroundService from '@web/hooks/useBackgroundService'
 import useSelectedAccountControllerState from '@web/hooks/useSelectedAccountControllerState'
 
@@ -36,13 +37,15 @@ const formatBalance = (balances: AssetAmount[]): string => {
 
 const ShieldScreen = () => {
   const { styles, theme } = useTheme(getStyles)
-  const { instance, broadcaster, isReady } = usePrivacyPoolsProtocol()
+  const { instance, broadcaster, isReady, notes: fetchNotes, ragequit } = usePrivacyPoolsProtocol()
   const { dispatch } = useBackgroundService()
   const { account } = useSelectedAccountControllerState()
 
   const [approvedBalances, setApprovedBalances] = useState<AssetAmount[]>([])
   const [unapprovedBalances, setUnapprovedBalances] = useState<AssetAmount[]>([])
+  const [notesList, setNotesList] = useState<PPv1Note[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [ragequitingLabel, setRagequitingLabel] = useState<PPv1Note['label'] | null>(null)
   const [shieldAmount, setShieldAmount] = useState('')
   const [isShielding, setIsShielding] = useState(false)
   const [shieldError, setShieldError] = useState<string | null>(null)
@@ -56,19 +59,50 @@ const ShieldScreen = () => {
 
     try {
       setIsLoading(true)
-      const balances = await instance.balance([NATIVE_ASSET])
+      const [balances, notes] = await Promise.all([
+        instance.balance([NATIVE_ASSET]),
+        fetchNotes([NATIVE_ASSET])
+      ])
       setApprovedBalances(balances.map((b) => ({ asset: b.asset, amount: b.amount })))
       setUnapprovedBalances(balances.map((b) => ({ asset: b.asset, amount: b.pendingAmount })))
+      setNotesList(notes)
     } catch {
       // Balances stay at defaults
     } finally {
       setIsLoading(false)
     }
-  }, [instance, isReady])
+  }, [instance, isReady, fetchNotes])
 
   useEffect(() => {
     fetchBalances()
   }, [fetchBalances])
+
+  const handleRagequit = useCallback(async (note: PPv1Note) => {
+    if (!account) return
+
+    setRagequitingLabel(note.label)
+    try {
+      const op = await ragequit([note.label])
+      const userRequest: SignUserRequest = {
+        id: Date.now(),
+        action: { kind: 'calls' as const, calls: op.txns },
+        session: new Session(),
+        meta: {
+          isSignAction: true,
+          accountAddr: account.addr,
+          chainId: BigInt(MAINNET_CONFIG.CHAIN_ID)
+        }
+      }
+      dispatch({
+        type: 'REQUESTS_CONTROLLER_ADD_USER_REQUEST',
+        params: { userRequest, actionExecutionType: 'open-action-window' }
+      })
+    } catch {
+      // Silently ignore ragequit errors
+    } finally {
+      setRagequitingLabel(null)
+    }
+  }, [account, ragequit, dispatch])
 
   const handleShield = useCallback(async () => {
     if (!instance || !shieldAmount || !account) return
@@ -167,6 +201,50 @@ const ShieldScreen = () => {
             <Text fontSize={20} weight="semiBold" style={[styles.balanceValue, spacings.mtTy]}>
               {formatBalance(unapprovedBalances)}
             </Text>
+          )}
+        </View>
+
+        <View style={[styles.balanceCard, spacings.mtSm]}>
+          <Text fontSize={14} weight="medium" style={spacings.mbSm}>
+            Notes
+          </Text>
+          {showLoading ? (
+            <SkeletonLoader width="100%" height={40} style={spacings.mtTy} />
+          ) : notesList.length === 0 ? (
+            <Text fontSize={13} style={styles.balanceLabel}>
+              No notes found
+            </Text>
+          ) : (
+            notesList.map((note, index) => (
+              <View
+                key={index}
+                style={[
+                  flexbox.directionRow,
+                  flexbox.alignCenter,
+                  flexbox.justifySpaceBetween,
+                  index < notesList.length - 1 && spacings.mbTy
+                ]}
+              >
+                <Text fontSize={13} style={styles.balanceLabel}>
+                  Note {index + 1}
+                </Text>
+                <View style={[flexbox.directionRow, flexbox.alignCenter]}>
+                  <Text fontSize={13} weight="medium" style={spacings.mrSm}>
+                    {formatEther(note.balance)} ETH
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => handleRagequit(note)}
+                    disabled={ragequitingLabel === note.label}
+                  >
+                    <FireIcon
+                      width={20}
+                      height={20}
+                      opacity={ragequitingLabel === note.label ? 0.4 : 1}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
           )}
         </View>
 

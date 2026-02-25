@@ -3,12 +3,13 @@ import { HDNodeWallet, Mnemonic } from 'ethers'
 import { createPublicClient, http } from 'viem'
 
 import {
+  ERC20AssetId,
   EthProvider,
   Host,
   Keystore,
   SecretStorage as PluginSecretStorage,
 } from '@kohaku-eth/plugins'
-import { createPPv1Plugin, MAINNET_CONFIG } from '@kohaku-eth/privacy-pools'
+import { createPPv1Plugin, MAINNET_CONFIG, PPv1Instance } from '@kohaku-eth/privacy-pools'
 import eventBus from '@web/extension-services/event/eventBus'
 import useBackgroundService from '@web/hooks/useBackgroundService'
 import useKeystoreControllerState from '@web/hooks/useKeystoreControllerState'
@@ -49,21 +50,25 @@ function createEthProvider(rpcUrl: string): EthProvider {
   }
 }
 
-type PPv1Plugin = Awaited<ReturnType<typeof createPPv1Plugin>>
-type PPv1Instance = Awaited<ReturnType<PPv1Plugin['createInstance']>>
 type PPv1PrivateOp = Awaited<ReturnType<PPv1Instance['prepareUnshield']>>
 type PPv1Broadcaster = { broadcast: (op: PPv1PrivateOp) => Promise<void> }
+export type PPv1Note = Awaited<ReturnType<PPv1Instance['notes']>>[number]
+export type PPv1PublicOp = Awaited<ReturnType<PPv1Instance['ragequit']>>
 
 interface PrivacyPoolsContextValue {
   instance: PPv1Instance | null
   broadcaster: PPv1Broadcaster | null
   isReady: boolean
+  notes: (assets?: ERC20AssetId[]) => Promise<PPv1Note[]>
+  ragequit: (labels: PPv1Note['label'][]) => Promise<PPv1PublicOp>
 }
 
 const PrivacyPoolsContext = createContext<PrivacyPoolsContextValue>({
   instance: null,
   broadcaster: null,
-  isReady: false
+  isReady: false,
+  notes: async () => [],
+  ragequit: async () => { throw new Error('Not ready') }
 })
 
 const PrivacyPoolsProtocolProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -75,6 +80,22 @@ const PrivacyPoolsProtocolProvider: React.FC<{ children: React.ReactNode }> = ({
   const [broadcaster, setBroadcaster] = useState<PPv1Broadcaster | null>(null)
   const [isReady, setIsReady] = useState(false)
   const initRef = useRef(false)
+
+  const notes = useCallback(
+    async (assets: ERC20AssetId[] = []) => {
+      if (!instance) return []
+      return instance.notes(assets)
+    },
+    [instance]
+  )
+
+  const ragequit = useCallback(
+    async (labels: PPv1Note['label'][]) => {
+      if (!instance) throw new Error('Not ready')
+      return instance.ragequit(labels)
+    },
+    [instance]
+  )
 
   const initProtocol = useCallback(
     async (seedPhrase: string) => {
@@ -136,7 +157,7 @@ const PrivacyPoolsProtocolProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [keystoreState, dispatch])
 
   return (
-    <PrivacyPoolsContext.Provider value={{ instance, broadcaster, isReady }}>
+    <PrivacyPoolsContext.Provider value={{ instance, broadcaster, isReady, notes, ragequit }}>
       {children}
     </PrivacyPoolsContext.Provider>
   )
