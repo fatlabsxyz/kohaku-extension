@@ -1,34 +1,19 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { HDNodeWallet, Mnemonic } from 'ethers'
 import { createPublicClient, http } from 'viem'
+import { viem } from '@kohaku-eth/provider/viem';
 
 import {
   ERC20AssetId,
-  EthProvider,
   Host,
   Keystore,
-  SecretStorage as PluginSecretStorage,
 } from '@kohaku-eth/plugins'
-import { createPPv1Plugin, MAINNET_CONFIG, PPv1Instance } from '@kohaku-eth/privacy-pools'
+import { createPPv1Plugin, createPPv1Broadcaster, MAINNET_CONFIG, PPv1Instance, PPv1Broadcaster } from '@kohaku-eth/privacy-pools'
 import eventBus from '@web/extension-services/event/eventBus'
 import useBackgroundService from '@web/hooks/useBackgroundService'
 import useKeystoreControllerState from '@web/hooks/useKeystoreControllerState'
 import useNetworksControllerState from '@web/hooks/useNetworksControllerState'
 import useStorageController from '@common/hooks/useStorageController'
-
-const SECRET_STORAGE_PREFIX = 'pp_v1_secret_'
-
-function createSecretStorage(): PluginSecretStorage {
-  return {
-    _brand: 'SecureStorage',
-    set(key: string, value: string) {
-      localStorage.setItem(`${SECRET_STORAGE_PREFIX}${key}`, value)
-    },
-    get(key: string) {
-      return localStorage.getItem(`${SECRET_STORAGE_PREFIX}${key}`)
-    }
-  }
-}
 
 function createKeystore(seedPhrase: string): Keystore {
   const mnemonic = Mnemonic.fromPhrase(seedPhrase)
@@ -42,16 +27,12 @@ function createKeystore(seedPhrase: string): Keystore {
   }
 }
 
-function createEthProvider(rpcUrl: string): EthProvider {
+function createProvider(rpcUrl: string) {
   const publicClient = createPublicClient({ transport: http(rpcUrl) })
 
-  return {
-    request: publicClient.request as never
-  }
+  return viem(publicClient);
 }
 
-type PPv1PrivateOp = Awaited<ReturnType<PPv1Instance['prepareUnshield']>>
-type PPv1Broadcaster = { broadcast: (op: PPv1PrivateOp) => Promise<void> }
 export type PPv1Note = Awaited<ReturnType<PPv1Instance['notes']>>[number]
 export type PPv1PublicOp = Awaited<ReturnType<PPv1Instance['ragequit']>>
 
@@ -107,26 +88,26 @@ const PrivacyPoolsProtocolProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (!rpcUrl) return
 
-      const host: Host = {
-        network: { fetch: globalThis.fetch.bind(globalThis) },
-        storage: { get: storage.getItem, set: storage.setItem } as Host['storage'],
-        secretStorage: createSecretStorage(),
-        keystore: createKeystore(seedPhrase),
-        ethProvider: createEthProvider(rpcUrl)
-      }
-
-      const pp = await createPPv1Plugin(host, {
+      const params = {
+        accountIndex: 0,
         ipfsUrl: 'http://localhost:3001/',
         broadcasterUrl: 'http://localhost:3000/relayer',
         entrypoint: {
           address: BigInt(MAINNET_CONFIG.ENTRYPOINT_ADDRESS),
           deploymentBlock: 22153713n
         }
-      })
+      }
 
-      const inst = await pp.createInstance()
+      const host: Host = {
+        network: { fetch: globalThis.fetch.bind(globalThis) },
+        storage: { get: storage.getItem, set: storage.setItem } as Host['storage'],
+        keystore: createKeystore(seedPhrase),
+        provider: createProvider(rpcUrl)
+      }
+
+      const inst = createPPv1Plugin(host, params)
       setInstance(inst)
-      setBroadcaster((pp as unknown as { broadcaster: PPv1Broadcaster }).broadcaster)
+      setBroadcaster(createPPv1Broadcaster(host, params))
       setIsReady(true)
     },
     [networksState, storage]
