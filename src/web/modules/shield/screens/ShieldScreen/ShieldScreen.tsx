@@ -5,7 +5,7 @@ import { formatEther, parseEther } from 'ethers'
 import { Session } from '@ambire-common/classes/session'
 import { SignUserRequest } from '@ambire-common/interfaces/userRequest'
 import { AssetAmount, ERC20AssetId } from '@kohaku-eth/plugins'
-import { MAINNET_CONFIG, E_ADDRESS } from '@kohaku-eth/privacy-pools'
+import { MAINNET_CONFIG, E_ADDRESS, PPv1AssetBalance } from '@kohaku-eth/privacy-pools'
 import FireIcon from '@common/assets/svg/FireIcon'
 import BackButton from '@common/components/BackButton'
 import Button from '@common/components/Button'
@@ -28,7 +28,7 @@ import getStyles from './styles'
 
 const NATIVE_ASSET: ERC20AssetId = { __type: 'erc20', contract: E_ADDRESS as `0x${string}` }
 
-const formatBalance = (balances: AssetAmount[]): string => {
+const formatBalance = (balances: PPv1AssetBalance[]): string => {
   if (!balances.length) return '0'
 
   const total = balances.reduce((sum, b) => sum + b.amount, 0n)
@@ -63,8 +63,10 @@ const ShieldScreen = () => {
         instance.balance([NATIVE_ASSET]),
         fetchNotes([NATIVE_ASSET])
       ])
-      setApprovedBalances(balances.map((b) => ({ asset: b.asset, amount: b.amount })))
-      setUnapprovedBalances(balances.map((b) => ({ asset: b.asset, amount: b.pendingAmount })))
+      const newApprovedBalances = balances.filter((b) => b.tag === undefined)
+      const pendingBalances = balances.filter((b) => b.tag === 'pending')
+      setApprovedBalances(newApprovedBalances)
+      setUnapprovedBalances(pendingBalances)
       setNotesList(notes)
     } catch {
       // Balances stay at defaults
@@ -77,32 +79,35 @@ const ShieldScreen = () => {
     fetchBalances()
   }, [fetchBalances])
 
-  const handleRagequit = useCallback(async (note: PPv1Note) => {
-    if (!account) return
+  const handleRagequit = useCallback(
+    async (note: PPv1Note) => {
+      if (!account) return
 
-    setRagequitingLabel(note.label)
-    try {
-      const op = await ragequit([note.label])
-      const userRequest: SignUserRequest = {
-        id: Date.now(),
-        action: { kind: 'calls' as const, calls: op.txns },
-        session: new Session(),
-        meta: {
-          isSignAction: true,
-          accountAddr: account.addr,
-          chainId: BigInt(MAINNET_CONFIG.CHAIN_ID)
+      setRagequitingLabel(note.label)
+      try {
+        const op = await ragequit([note.label])
+        const userRequest: SignUserRequest = {
+          id: Date.now(),
+          action: { kind: 'calls' as const, calls: op.txns },
+          session: new Session(),
+          meta: {
+            isSignAction: true,
+            accountAddr: account.addr,
+            chainId: BigInt(MAINNET_CONFIG.CHAIN_ID)
+          }
         }
+        dispatch({
+          type: 'REQUESTS_CONTROLLER_ADD_USER_REQUEST',
+          params: { userRequest, actionExecutionType: 'open-action-window' }
+        })
+      } catch {
+        // Silently ignore ragequit errors
+      } finally {
+        setRagequitingLabel(null)
       }
-      dispatch({
-        type: 'REQUESTS_CONTROLLER_ADD_USER_REQUEST',
-        params: { userRequest, actionExecutionType: 'open-action-window' }
-      })
-    } catch {
-      // Silently ignore ragequit errors
-    } finally {
-      setRagequitingLabel(null)
-    }
-  }, [account, ragequit, dispatch])
+    },
+    [account, ragequit, dispatch]
+  )
 
   const handleShield = useCallback(async () => {
     if (!instance || !shieldAmount || !account) return
