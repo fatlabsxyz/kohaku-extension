@@ -1,14 +1,16 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { HDNodeWallet, Mnemonic } from 'ethers'
 import { createPublicClient, http } from 'viem'
-import { viem } from '@kohaku-eth/provider/viem';
+import { viem } from '@kohaku-eth/provider/viem'
 
+import { ERC20AssetId, Host, Keystore } from '@kohaku-eth/plugins'
 import {
-  ERC20AssetId,
-  Host,
-  Keystore,
-} from '@kohaku-eth/plugins'
-import { createPPv1Plugin, createPPv1Broadcaster, MAINNET_CONFIG, PPv1Instance, PPv1Broadcaster } from '@kohaku-eth/privacy-pools'
+  createPPv1Plugin,
+  createPPv1Broadcaster,
+  MAINNET_CONFIG,
+  PPv1Instance,
+  PPv1Broadcaster
+} from '@kohaku-eth/privacy-pools'
 import eventBus from '@web/extension-services/event/eventBus'
 import useBackgroundService from '@web/hooks/useBackgroundService'
 import useKeystoreControllerState from '@web/hooks/useKeystoreControllerState'
@@ -30,7 +32,7 @@ function createKeystore(seedPhrase: string): Keystore {
 function createProvider(rpcUrl: string) {
   const publicClient = createPublicClient({ transport: http(rpcUrl) })
 
-  return viem(publicClient);
+  return viem(publicClient)
 }
 
 export type PPv1Note = Awaited<ReturnType<PPv1Instance['notes']>>[number]
@@ -49,7 +51,9 @@ const PrivacyPoolsContext = createContext<PrivacyPoolsContextValue>({
   broadcaster: null,
   isReady: false,
   notes: async () => [],
-  ragequit: async () => { throw new Error('Not ready') }
+  ragequit: async () => {
+    throw new Error('Not ready')
+  }
 })
 
 const PrivacyPoolsProtocolProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -98,11 +102,13 @@ const PrivacyPoolsProtocolProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }
 
+      const provider = await createProvider(rpcUrl)
+
       const host: Host = {
         network: { fetch: globalThis.fetch.bind(globalThis) },
         storage: { get: storage.getItem, set: storage.setItem } as Host['storage'],
         keystore: createKeystore(seedPhrase),
-        provider: createProvider(rpcUrl)
+        provider
       }
 
       const inst = createPPv1Plugin(host, params)
