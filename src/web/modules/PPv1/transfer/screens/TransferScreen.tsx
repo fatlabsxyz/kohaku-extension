@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatUnits, parseUnits, getAddress } from 'viem'
@@ -37,10 +38,10 @@ import { getUiType } from '@web/utils/uiType'
 import { View } from 'react-native'
 import flexbox from '@common/styles/utils/flexbox'
 import { Wrapper, Content, Form } from '@web/components/TransactionsScreen'
-import usePrivacyPoolsForm from '@web/modules/PPv1/hooks/usePrivacyPoolsForm'
 import PrivacyProtocolSelector, {
   getPrivacyProtocolOptions
 } from '@web/components/PrivacyProtocols'
+import { usePrivacyPoolsDepositForm } from '@web/hooks/useDepositForm'
 import TransferForm from '../components/TransferForm/TransferForm'
 import RailgunTransferForm from '../components/RailgunTransferForm/RailgunTransferForm'
 import { TransferTabType } from '../components/Tabs/Tabs'
@@ -55,38 +56,41 @@ const TransferScreen = () => {
   const tokenFromParams = searchParams.get('token') ?? ''
   const showFundFreshAccountBanner = searchParams.get('fundBanner') === '1'
   const hasRefreshedAccountRef = useRef(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSubmittingState, setIsSubmittingState] = useState(false)
   const [selectedPrivacyProtocol, setSelectedPrivacyProtocol] = useState<SelectValue>(
     getPrivacyProtocolOptions(t)[protocolFromParams === 'privacy-pools' ? 1 : 0]
   )
   const activeProtocol = selectedPrivacyProtocol.value as TransferTabType
   const { dispatch } = useBackgroundService()
   const {
-    chainId,
     poolInfo,
     totalApprovedBalance,
     loadingSelectionAlgorithm,
+    withdrawalAmount,
     handleUpdateForm,
     refreshPrivateAccount,
-    handleMultipleWithdrawal
-  } = usePrivacyPoolsForm()
-  const {
-    validationFormMsgs,
-    addressState,
-    isRecipientAddressUnknown,
-    latestBroadcastedAccountOp,
-    latestBroadcastedToken,
     selectedToken,
+    addressState,
+    validationFormMsgs,
+    latestBroadcastedAccountOp,
+    isRecipientAddressUnknown,
+    latestBroadcastedToken,
     amountFieldMode,
-    withdrawalAmount,
     amountInFiat,
     programmaticUpdateCounter,
     isRecipientAddressUnknownAgreed,
     maxAmount,
     relayerQuote,
     updateQuoteStatus,
-    isRefreshing
-  } = usePrivacyPoolsControllerState()
+    isRefreshing,
+    unshield,
+    isUnshielding
+  } = usePrivacyPoolsDepositForm()
+
+  const isSubmitting = useMemo(
+    () => (activeProtocol === 'railgun' ? isSubmittingState : isUnshielding),
+    [activeProtocol, isSubmittingState, isUnshielding]
+  )
 
   const { accountsOps } = useActivityControllerState()
   const { addToast } = useToast()
@@ -207,7 +211,9 @@ const TransferScreen = () => {
       // Match by signature (txHash) or txnId
       if (accountsOps.transfer) {
         const signature = railgunLatestBroadcastedAccountOp.signature
-        const txnId = railgunLatestBroadcastedAccountOp.txnId || (railgunLatestBroadcastedAccountOp as any).meta?.txnId
+        const txnId =
+          railgunLatestBroadcastedAccountOp.txnId ||
+          (railgunLatestBroadcastedAccountOp as any).meta?.txnId
 
         const found = accountsOps.transfer.result.items.find(
           (accOp) =>
@@ -289,10 +295,9 @@ const TransferScreen = () => {
     if (activeProtocol === 'railgun') {
       // For Railgun, must have isRailgunWithdrawal meta tag
       return !!metaAny?.isRailgunWithdrawal
-    } else {
-      // For Privacy Pools, must have isPrivacyPoolsWithdrawal meta tag
-      return !!metaAny?.isPrivacyPoolsWithdrawal
     }
+    // For Privacy Pools, must have isPrivacyPoolsWithdrawal meta tag
+    return !!metaAny?.isPrivacyPoolsWithdrawal
   }, [submittedAccountOp, activeProtocol])
 
   const explorerLink = useMemo(() => {
@@ -437,17 +442,16 @@ const TransferScreen = () => {
   }
 
   const amountErrorMessage = useMemo(() => {
-    if (!withdrawalAmount || withdrawalAmount.trim() === '') return ''
-    if (!poolInfo) return ''
+    if (!withdrawalAmount || withdrawalAmount.trim() === '' || !selectedToken) return ''
 
     try {
-      const amount = parseUnits(withdrawalAmount, 18)
+      const amount = parseUnits(withdrawalAmount, selectedToken.decimals)
 
-      if (amount < poolInfo.minWithdrawal) {
-        return `Minimum transfer amount is ${formatUnits(poolInfo.minWithdrawal, 18)} ETH`
-      }
+      // if (amount < poolInfo.minWithdrawal) {
+      //   return `Minimum transfer amount is ${formatUnits(poolInfo.minWithdrawal, 18)} ETH`
+      // }
 
-      if (amount > totalApprovedBalance.total) {
+      if (amount > parseUnits(maxAmount, selectedToken.decimals)) {
         return 'Insufficient amount'
       }
 
@@ -464,7 +468,7 @@ const TransferScreen = () => {
     } catch (error) {
       return 'Invalid amount'
     }
-  }, [withdrawalAmount, totalApprovedBalance.total, poolInfo, relayerQuote])
+  }, [withdrawalAmount, relayerQuote, maxAmount, selectedToken])
 
   // Privacy Pools form validation
   const isTransferFormValid = useMemo(() => {
@@ -629,28 +633,43 @@ const TransferScreen = () => {
 
       // Navigate immediately instead of waiting for the flag
       navigateOut()
+    } else if (
+      submittedAccountOp?.status === AccountOpStatus.Failure ||
+      submittedAccountOp?.status === AccountOpStatus.BroadcastButStuck ||
+      submittedAccountOp?.status === AccountOpStatus.Rejected
+    ) {
+      // Error states: clean up and navigate directly (no banner to hide)
+      dispatch({
+        type: 'RAILGUN_CONTROLLER_DESTROY_LATEST_BROADCASTED_ACCOUNT_OP'
+      })
+      dispatch({
+        type: 'PRIVACY_POOLS_CONTROLLER_DESTROY_LATEST_BROADCASTED_ACCOUNT_OP'
+      })
+      dispatch({
+        type: 'PRIVACY_POOLS_CONTROLLER_HAS_USER_PROCEEDED',
+        params: {
+          proceeded: false
+        }
+      })
+      dispatch({
+        type: 'RAILGUN_CONTROLLER_HAS_USER_PROCEEDED',
+        params: {
+          proceeded: false
+        }
+      })
+      navigateOut()
     } else {
       // For other states, use the original logic
       onPrimaryButtonPress()
     }
-  }, [submittedAccountOp, dispatch, navigateOut, onPrimaryButtonPress, activeProtocol])
+  }, [submittedAccountOp, dispatch, navigateOut, onPrimaryButtonPress])
 
-  const handleWithdrawal = useCallback(async () => {
-    setIsSubmitting(true)
-    try {
-      await handleMultipleWithdrawal()
-    } catch (error) {
-      console.error('Withdrawal error:', error)
-      addToast('Unable to generate proof for transfer. Please try again.', {
-        type: 'error',
-        timeout: 8000
-      })
-      setIsSubmitting(false)
-    }
-  }, [handleMultipleWithdrawal, addToast])
+  const handleWithdrawal = useCallback(() => {
+    unshield()
+  }, [unshield])
 
   const handleRailgunWithdrawal = useCallback(async () => {
-    setIsSubmitting(true)
+    setIsSubmittingState(true)
     let isInternalTransfer = false
     try {
       // Use synced state values (current input values) instead of controller state
@@ -686,7 +705,7 @@ const TransferScreen = () => {
           addressStateFieldValue: railgunAddressStateFieldValue,
           addressStateEnsAddress: railgunAddressState.ensAddress
         })
-        setIsSubmitting(false)
+        setIsSubmittingState(false)
         return
       }
 
@@ -697,7 +716,7 @@ const TransferScreen = () => {
         console.error(
           'Failed to get synced Railgun account. Ensure loadPrivateAccount has been called.'
         )
-        setIsSubmitting(false)
+        setIsSubmittingState(false)
         return
       }
 
@@ -735,12 +754,12 @@ const TransferScreen = () => {
           let tokenAddress = railgunSelectedToken.address
           if (isNativeETH) {
             const networkConfig =
-            RAILGUN_CONFIG_BY_CHAIN_ID[
-              railgunChainId?.toString() as keyof typeof RAILGUN_CONFIG_BY_CHAIN_ID
-            ]
+              RAILGUN_CONFIG_BY_CHAIN_ID[
+                railgunChainId?.toString() as keyof typeof RAILGUN_CONFIG_BY_CHAIN_ID
+              ]
             if (!networkConfig?.WETH) {
               console.error('WETH address not found for chainId:', railgunChainId)
-              setIsSubmitting(false)
+              setIsSubmittingState(false)
               return
             }
             tokenAddress = networkConfig.WETH
@@ -777,7 +796,7 @@ const TransferScreen = () => {
                 ]
               if (!networkConfig?.WETH) {
                 console.error('WETH address not found for chainId:', railgunChainId)
-                setIsSubmitting(false)
+                setIsSubmittingState(false)
                 return
               }
               tokenAddress = networkConfig.WETH
@@ -795,7 +814,7 @@ const TransferScreen = () => {
         }
       } catch (error) {
         console.error('Error generating transaction:', error)
-        setIsSubmitting(false)
+        setIsSubmittingState(false)
         const errorMessage = isInternalTransfer
           ? 'Unable to generate internal transfer transaction. Please try again.'
           : 'Unable to generate withdrawal transaction. Please try again.'
@@ -808,20 +827,33 @@ const TransferScreen = () => {
 
       // Submit transaction directly to relayer (no estimation modal)
       // The controller will set latestBroadcastedAccountOp immediately, causing UI to show track screen
-      console.log(isInternalTransfer ? 'Submitting internal transfer to relayer...' : 'Submitting withdrawal to relayer...')
+      console.log(
+        isInternalTransfer
+          ? 'Submitting internal transfer to relayer...'
+          : 'Submitting withdrawal to relayer...'
+      )
       await railgunForm.directBroadcastWithdrawal({
         to: txData.to,
         data: txData.data,
-        value: isNativeETH && !withdrawAsWETH ? (typeof txData.value === 'string' ? txData.value : txData.value.toString()) : '0',
+        value:
+          isNativeETH && !withdrawAsWETH
+            ? typeof txData.value === 'string'
+              ? txData.value
+              : txData.value.toString()
+            : '0',
         chainId: railgunChainId || 11155111,
         isInternalTransfer
       })
-      console.log(isInternalTransfer ? 'Internal transfer submitted successfully' : 'Withdrawal submitted successfully')
+      console.log(
+        isInternalTransfer
+          ? 'Internal transfer submitted successfully'
+          : 'Withdrawal submitted successfully'
+      )
       // Note: isSubmitting will be reset when the transaction completes or fails
       // The UI will show the track screen immediately after directBroadcastWithdrawal is called
     } catch (error) {
       console.error('Error submitting transaction:', error)
-      setIsSubmitting(false)
+      setIsSubmittingState(false)
       const errorMessage = isInternalTransfer
         ? 'Unable to submit internal transfer. Please try again.'
         : 'Unable to submit withdrawal. Please try again.'
@@ -831,13 +863,14 @@ const TransferScreen = () => {
       })
     }
   }, [
-    railgunForm,
-    railgunSelectedToken,
     railgunAmountFieldValue,
     railgunWithdrawalAmount,
-    railgunAddressInputState.address,
     railgunAddressStateFieldValue,
     railgunAddressState.ensAddress,
+    railgunAddressInputState.address,
+    railgunSelectedToken,
+    railgunForm,
+    dispatch,
     railgunChainId,
     addToast
   ])
@@ -930,25 +963,25 @@ const TransferScreen = () => {
         railgunForm
           .refreshPrivateAccount()
           .then(() => {
-            setIsSubmitting(false)
+            setIsSubmittingState(false)
           })
           .catch((error) => {
             // eslint-disable-next-line no-console
             console.error('Failed to refresh after Railgun withdrawal:', error)
             addToast('Failed to refresh your privacy account. Please try again.', { type: 'error' })
-            setIsSubmitting(false)
+            setIsSubmittingState(false)
           })
       } else {
         // For Privacy Pools
-        refreshPrivateAccount(true)
+        refreshPrivateAccount()
           .then(() => {
-            setIsSubmitting(false)
+            setIsSubmittingState(false)
           })
           .catch((error) => {
             // eslint-disable-next-line no-console
             console.error('Failed to refresh after withdrawal:', error)
             addToast('Failed to refresh your privacy account. Please try again.', { type: 'error' })
-            setIsSubmitting(false)
+            setIsSubmittingState(false)
           })
       }
     }
@@ -992,7 +1025,8 @@ const TransferScreen = () => {
           <InProgress
             title={
               activeProtocol === 'railgun'
-                ? (submittedAccountOp?.meta as any)?.isRailgunInternalTransfer || (currentLatestBroadcastedAccountOp as any)?.meta?.isRailgunInternalTransfer
+                ? (submittedAccountOp?.meta as any)?.isRailgunInternalTransfer ||
+                  (currentLatestBroadcastedAccountOp as any)?.meta?.isRailgunInternalTransfer
                   ? t('Relaying internal transfer')
                   : t('Relaying withdrawal')
                 : t('Confirming your transfer')
@@ -1006,21 +1040,21 @@ const TransferScreen = () => {
         {(submittedAccountOp?.status === AccountOpStatus.Success ||
           submittedAccountOp?.status === AccountOpStatus.UnknownButPastNonce) &&
           isMatchingWithdrawal && (
-          <Completed
-            title={
-              activeProtocol === 'railgun' &&
-              ((submittedAccountOp?.meta as any)?.isRailgunInternalTransfer ||
-                (currentLatestBroadcastedAccountOp as any)?.meta?.isRailgunInternalTransfer)
-                ? t('Private Internal Transfer done!')
-                : t('Private Transfer done!')
-            }
-            titleSecondary={t('{{symbol}} sent!', {
-              symbol: currentLatestBroadcastedToken?.symbol || 'Token'
-            })}
-            explorerLink={explorerLink}
-            openExplorerText="View Transfer"
-          />
-        )}
+            <Completed
+              title={
+                activeProtocol === 'railgun' &&
+                ((submittedAccountOp?.meta as any)?.isRailgunInternalTransfer ||
+                  (currentLatestBroadcastedAccountOp as any)?.meta?.isRailgunInternalTransfer)
+                  ? t('Private Internal Transfer done!')
+                  : t('Private Transfer done!')
+              }
+              titleSecondary={t('{{symbol}} sent!', {
+                symbol: currentLatestBroadcastedToken?.symbol || 'Token'
+              })}
+              explorerLink={explorerLink}
+              openExplorerText="View Transfer"
+            />
+          )}
         {(submittedAccountOp?.status === AccountOpStatus.Failure ||
           submittedAccountOp?.status === AccountOpStatus.Rejected ||
           submittedAccountOp?.status === AccountOpStatus.BroadcastButStuck) && (
@@ -1072,7 +1106,6 @@ const TransferScreen = () => {
               controllerAmount={withdrawalAmount}
               totalApprovedBalance={totalApprovedBalance}
               updateQuoteStatus={updateQuoteStatus}
-              chainId={chainId ? BigInt(chainId) : BigInt(1)}
             />
           ) : (
             <RailgunTransferForm

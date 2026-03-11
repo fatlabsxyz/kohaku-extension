@@ -16,8 +16,8 @@ import flexbox from '@common/styles/utils/flexbox'
 import useHover, { AnimatedPressable } from '@web/hooks/useHover'
 import useMainControllerState from '@web/hooks/useMainControllerState'
 import useSelectedAccountControllerState from '@web/hooks/useSelectedAccountControllerState'
-import usePrivacyPoolsForm from '@web/modules/PPv1/hooks/usePrivacyPoolsForm'
 
+import usePrivacyPools from '@web/hooks/usePrivacyPools/usePrivacyPools'
 import RefreshIcon from './RefreshIcon'
 import getStyles from './styles'
 
@@ -50,8 +50,7 @@ const DashboardOverview: FC<Props> = ({
   const { theme, styles, themeType } = useTheme(getStyles)
   const { isOffline } = useMainControllerState()
   const { portfolio } = useSelectedAccountControllerState()
-  const { isLoading, isAccountLoaded, ethPrivateBalance, refreshPrivateAccount } =
-    usePrivacyPoolsForm()
+  const { isReady, isSynced, sync } = usePrivacyPools()
 
   const [bindRefreshButtonAnim, refreshButtonAnimStyle] = useHover({
     preset: 'opacity'
@@ -125,7 +124,7 @@ const DashboardOverview: FC<Props> = ({
             >
               <View>
                 <View style={[flexbox.directionRow, flexbox.alignCenter, spacings.mbTy]}>
-                  {isLoading || !isAccountLoaded ? (
+                  {!isReady || !isSynced ? (
                     <SkeletonLoader
                       lowOpacity
                       width={200}
@@ -157,7 +156,8 @@ const DashboardOverview: FC<Props> = ({
                           selectable
                           testID="total-portfolio-amount-eth"
                         >
-                          {ethPrivateBalance} ETH
+                          {/* {ethPrivateBalance} ETH */}
+                          {0} ETH
                         </Text>
                         <Text
                           fontSize={20}
@@ -177,7 +177,7 @@ const DashboardOverview: FC<Props> = ({
                   )}
                   <AnimatedPressable
                     style={[spacings.mlTy, refreshButtonAnimStyle]}
-                    onPress={() => refreshPrivateAccount(true)}
+                    onPress={() => sync()}
                     {...bindRefreshButtonAnim}
                     disabled={!portfolio?.isAllReady}
                     testID="refresh-button"

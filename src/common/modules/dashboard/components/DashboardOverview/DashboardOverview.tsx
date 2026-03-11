@@ -243,26 +243,27 @@ const DashboardOverview: FC<Props> = ({
                 </View>
 
                 <View style={[flexbox.directionRow, flexbox.alignCenter]}>
-                  {(isPrivateAccountLoading || isRailgunAccountLoading) && !privateAccountLoadingError && (
-                    <>
-                      <Spinner
-                        variant="white"
-                        style={{
-                          width: 24,
-                          height: 24
-                        }}
-                      />
-                      <Text
-                        fontSize={16}
-                        shouldScale={false}
-                        weight="number_bold"
-                        color={theme.primaryBackground}
-                        style={spacings.mlTy}
-                      >
-                        Loading Private Account
-                      </Text>
-                    </>
-                  )}
+                  {(isPrivateAccountLoading || isRailgunAccountLoading) &&
+                    !privateAccountLoadingError && (
+                      <>
+                        <Spinner
+                          variant="white"
+                          style={{
+                            width: 24,
+                            height: 24
+                          }}
+                        />
+                        <Text
+                          fontSize={16}
+                          shouldScale={false}
+                          weight="number_bold"
+                          color={theme.primaryBackground}
+                          style={spacings.mlTy}
+                        >
+                          Loading Private Account
+                        </Text>
+                      </>
+                    )}
                   {privateAccountLoadingError && onRetryLoadPrivateAccount && (
                     <Pressable
                       onPress={onRetryLoadPrivateAccount}
